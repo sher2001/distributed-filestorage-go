@@ -88,10 +88,12 @@ func (s *Store) Has(key string) bool {
 	pathKey := s.PathTransformFunc(key)
 	path := s.pathWithRoot(pathKey.FullPath())
 	_, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-	return true
+
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+func (s *Store) Clear() error {
+	return os.RemoveAll(s.Root)
 }
 
 func (s *Store) Delete(key string) error {
@@ -105,8 +107,12 @@ func (s *Store) Delete(key string) error {
 	return os.RemoveAll(path)
 }
 
+func (s *Store) Write(key string, r io.Reader) error {
+	return s.writeStream(key, r)
+}
+
 func (s *Store) Read(key string) (io.Reader, error) {
-	f, err := s.ReadStream(key)
+	f, err := s.readStream(key)
 	if err != nil {
 		return nil, err
 	}
@@ -118,13 +124,13 @@ func (s *Store) Read(key string) (io.Reader, error) {
 	return buff, err
 }
 
-func (s *Store) ReadStream(key string) (io.ReadCloser, error) {
+func (s *Store) readStream(key string) (io.ReadCloser, error) {
 	pathKey := s.PathTransformFunc(key)
 	path := s.pathWithRoot(pathKey.FullPath())
 	return os.Open(path)
 }
 
-func (s *Store) WriteStream(key string, r io.Reader) error {
+func (s *Store) writeStream(key string, r io.Reader) error {
 	pathKey := s.PathTransformFunc(key)
 	if err := os.MkdirAll(s.pathWithRoot(pathKey.PathName), os.ModePerm); err != nil {
 		return err
