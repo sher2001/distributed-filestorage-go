@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
+	"io"
 	"log"
 	"sync"
 
@@ -38,6 +41,55 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 	}
 }
 
+type Message struct {
+	From    string
+	payload any
+}
+
+type DataMessage struct {
+	key  string
+	data []byte
+}
+
+func (s *FileServer) broadcast(msg *Message) error {
+	// as Peer implements Conn, it also implements Writer and Reader as well
+	peers := []io.Writer{}
+	for _, peer := range s.peers {
+		peers = append(peers, peer)
+	}
+
+	mw := io.MultiWriter(peers...)
+	fmt.Printf("while broadcasting msg: %+v\n", msg.payload)
+	return gob.NewEncoder(mw).Encode(msg)
+}
+
+func (s *FileServer) StoreData(key string, r io.Reader) error {
+	// 1. store data to disk
+
+	// Reader will be empty after compleatly red so need to use this.
+	buff := new(bytes.Buffer)
+	tee := io.TeeReader(r, buff)
+
+	if err := s.store.Write(key, tee); err != nil {
+		return err
+	}
+
+	// 2. broadcast5 this file to all known peers in the Network.
+
+	if _, err := io.Copy(buff, r); err != nil {
+		return err
+	}
+	dataMessage := DataMessage{
+		key:  key,
+		data: buff.Bytes(),
+	}
+	fmt.Printf("bef0re broadcasting msg: %+v\n", dataMessage)
+	return s.broadcast(&Message{
+		From:    "todo",
+		payload: dataMessage,
+	})
+}
+
 func (s *FileServer) loop() {
 	defer func() {
 		log.Println("file server stopped due to quit action")
@@ -45,12 +97,29 @@ func (s *FileServer) loop() {
 	}()
 	for {
 		select {
-		case msg := <-s.Transport.Consume():
-			fmt.Println(msg)
+		case rpc := <-s.Transport.Consume():
+			var msg Message
+			fmt.Println("recieved msg")
+			if err := gob.NewDecoder(bytes.NewReader(rpc.Payload)).Decode(&msg); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("decoded msg: %+v\n", msg)
+			if err := s.handlePayload(&msg); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("handled msg")
 		case <-s.quitch:
 			return
 		}
 	}
+}
+
+func (s *FileServer) handlePayload(p *Message) error {
+	switch v := p.payload.(type) {
+	case DataMessage:
+		fmt.Printf("recieved data %+v\n", v)
+	}
+	return nil
 }
 
 func (s *FileServer) OnPeer(p p2p.Peer) error {
