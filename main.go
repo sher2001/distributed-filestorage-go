@@ -2,40 +2,36 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"github.com/sher2001/go-distributed-filestorage/p2p"
 )
 
-// TODO
-// func OnPeer(peer p2p.Peer) error {
-// 	peer.Close()
-// 	fmt.Println("doing some logic with peer outside of tcp transport")
-// 	return nil
-// }
-
-func main() {
+func makeServer(listenAddr string, nodes ...string) *FileServer {
 	tcpTransportOpts := p2p.TCPTransportOpts{
-		ListenAddr:    ":8081",
+		ListenAddr:    listenAddr,
 		HandShakeFunc: p2p.NOPHandshakeFunc,
 		Decoder:       p2p.DefaultDecoder{},
-		// TODO OnPeer
 	}
 	tcpTransport := p2p.NewTCPTransport(tcpTransportOpts)
 
 	fileServerOpts := FileServerOpts{
-		StorageRoot:       "8081_network",
+		StorageRoot:       listenAddr + "_network",
 		PathTransFormFunc: CASPathTransformFunc,
 		Transport:         tcpTransport,
+		BootstrapNodes:    nodes,
 	}
-	s := NewFileServer(fileServerOpts)
 
+	s := NewFileServer(fileServerOpts)
+	tcpTransport.OnPeer = s.OnPeer
+	return s
+}
+
+func main() {
+	s1 := makeServer(":3000")
+	s2 := makeServer(":4000", ":3000")
 	go func() {
-		time.Sleep(5 * time.Second)
-		s.Stop()
+		log.Fatal(s1.Start())
 	}()
 
-	if err := s.Start(); err != nil {
-		log.Fatal(err)
-	}
+	s2.Start()
 }
